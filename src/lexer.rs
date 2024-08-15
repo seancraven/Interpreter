@@ -5,7 +5,7 @@ pub struct Lexer {
     input: String,
 }
 impl Lexer {
-    fn new(input: impl Into<String>) -> Lexer {
+    pub fn new(input: impl Into<String>) -> Lexer {
         let input = input.into();
         Lexer { input }
     }

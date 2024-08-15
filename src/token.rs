@@ -1,4 +1,4 @@
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Default)]
 pub enum Token {
     EOF,             // end of file
     Illegal(String), // not allowd tokens
@@ -36,4 +36,7 @@ pub enum Token {
 
     Lbrakcet, // }
     Rbracket, // {
+    //
+    #[default]
+    Default,
 }
