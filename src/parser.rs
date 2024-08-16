@@ -1,76 +1,49 @@
-use std::rc::Rc;
+use std::collections::HashMap;
 
 use anyhow::anyhow;
 
+use crate::ast::{
+    Expression, ExpressionStatement, Identifier, LetStatement, ReturnStatement, Statement,
+};
 use crate::lexer::{Lexer, LexerIterator};
-use crate::token::Token;
-trait Node {
-    fn token_literal(&self) -> Token;
-}
-
-#[derive(Debug)]
-enum Expression {
-    None,
-}
-#[derive(Debug)]
-enum Statement {
-    Let(LetStatement),
-}
-impl Node for Statement {
-    fn token_literal(&self) -> Token {
-        match self {
-            Self::Let(s) => s.token_literal(),
-        }
-    }
-}
+use crate::token::{Precidence, Token, TokenMap};
 
 pub struct Program {
     pub statements: Vec<Statement>,
     pub errors: Vec<anyhow::Error>,
 }
-#[derive(Debug)]
-struct Identifier(String);
-impl Node for Identifier {
-    fn token_literal(&self) -> Token {
-        Token::IDENT(self.0.clone())
-    }
-}
-
-#[derive(Debug)]
-struct LetStatement {
-    token: Token,
-    name: Identifier,
-    value: Expression,
-}
-impl LetStatement {
-    fn new(token: Token, name: Identifier, value: Expression) -> LetStatement {
-        LetStatement { token, name, value }
-    }
-}
-impl Node for LetStatement {
-    fn token_literal(&self) -> Token {
-        Token::IDENT(self.name.0.clone())
-    }
-}
-
-struct Parser<'s> {
+pub struct Parser<'s> {
     l: LexerIterator<'s>,
     current_token: Token,
     next_token: Token,
+    tm: TokenMap,
 }
 impl<'s> Parser<'s> {
-    fn new(lexer: &'s Lexer) -> Parser<'s> {
+    pub fn new(lexer: &'s Lexer) -> Parser<'s> {
         let mut l = lexer.into_iter();
         let current_token = l.next().unwrap();
         let next_token = l.next().unwrap();
+        let mut tm = TokenMap::new();
+        tm.insert_prefix(&Token::IDENT(String::new()), Box::new(Parser::parse_ident));
         Parser {
             l,
             current_token,
             next_token,
+            tm,
         }
     }
-    fn parse_expression(&mut self) -> Option<Expression> {
-        todo!()
+    fn parse_ident(t: &Token) -> Expression {
+        match t.clone() {
+            Token::IDENT(s) => Expression::Iden(Identifier(s.clone())),
+            _ => panic!("Tried parsing identifier, but the current token isn't an identifier."),
+        }
+    }
+    fn parse_expression(&mut self, p: Precidence) -> Option<Expression> {
+        let Some(prefix) = self.tm.get_prefix(&self.current_token) else {
+            return None;
+        };
+        let left_exp = prefix(&self.current_token);
+        return Some(left_exp);
     }
     fn parse_statement(&mut self) -> anyhow::Result<Option<Statement>> {
         match self.current_token {
@@ -91,7 +64,9 @@ impl<'s> Parser<'s> {
                 }
                 self.next();
                 self.next();
-                // let value = self.parse_expression().expect("Couldn't parse expression.");
+                // let value = self
+                //     .parse_expression(Precidence::Lowest)
+                //     .expect("Couldn't parse expression.");
                 let out = Ok(Some(Statement::Let(LetStatement::new(
                     token,
                     name,
@@ -104,7 +79,26 @@ impl<'s> Parser<'s> {
                 }
                 out
             }
-            _ => return Ok(None),
+            Token::Return => {
+                let token = std::mem::take(&mut self.current_token);
+                let exp = Expression::None;
+                let out: anyhow::Result<Option<Statement>> =
+                    Ok(Some(Statement::Return(ReturnStatement::new(token, exp))));
+                while let Some(t) = self.next() {
+                    if *t == Token::SemiColon {
+                        break;
+                    }
+                }
+                out
+            }
+            _ => {
+                let Some(exp) = self.parse_expression(Precidence::Lowest) else {
+                    return Ok(None);
+                };
+                let stmt_token = std::mem::take(&mut self.current_token);
+                let stmt = ExpressionStatement::new(stmt_token, exp);
+                return Ok(Some(Statement::Expression(stmt)));
+            }
         }
     }
     fn next(&mut self) -> Option<&Token> {
@@ -120,7 +114,7 @@ impl<'s> Parser<'s> {
             }
         }
     }
-    fn parse_program(&mut self) -> anyhow::Result<Program> {
+    pub fn parse_program(&mut self) -> anyhow::Result<Program> {
         let mut statements = vec![];
         let mut errors = vec![];
         while self.current_token != Token::EOF {
@@ -140,9 +134,12 @@ impl<'s> Parser<'s> {
 
 #[cfg(test)]
 mod tests {
+    use core::panic;
+
     use crate::lexer::Lexer;
 
     use super::*;
+    use crate::ast::Node;
 
     #[test]
     fn test_let_statement() {
@@ -164,5 +161,29 @@ mod tests {
         let lexer = Lexer::new(input);
         let p = Parser::new(&lexer).parse_program().unwrap();
         assert_eq!(p.errors.len(), 3, "{:?}", p.errors)
+    }
+    #[test]
+    fn test_return_statement() {
+        let input = "return 5;\nreturn 15;\nreturn x;";
+        let lexer = Lexer::new(input);
+        let p = Parser::new(&lexer).parse_program().unwrap();
+        assert_eq!(p.statements.len(), 3);
+        for stmt in p.statements {
+            match stmt {
+                Statement::Return(_) => (),
+                _ => panic!("Wrong statement type."),
+            }
+        }
+    }
+    #[test]
+    fn test_expression_statement() {
+        let input = "fubar;";
+        let lexer = Lexer::new(input);
+        let p = Parser::new(&lexer).parse_program().unwrap();
+        assert_eq!(p.statements.len(), 1, "Expected one expression statement.");
+        match p.statements[0] {
+            Statement::Expression(_) => (),
+            _ => panic!("Wrong statement type."),
+        }
     }
 }
