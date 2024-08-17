@@ -1,17 +1,101 @@
+use std::usize;
+
+use anyhow::anyhow;
+
 use crate::token::Token;
 
 pub trait Node {
     fn token_literal(&self) -> Token;
     fn to_string(&self) -> String;
 }
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone)]
+pub enum PrefixToken {
+    Not,
+    Minus,
+}
+impl TryFrom<Token> for PrefixToken {
+    type Error = anyhow::Error;
+    fn try_from(value: Token) -> Result<Self, Self::Error> {
+        match value {
+            Token::Minus => Ok(PrefixToken::Minus),
+            Token::Not => Ok(PrefixToken::Not),
+            _ => Err(anyhow!("Invalid conversion must be !, -")),
+        }
+    }
+}
+impl PrefixToken {
+    pub fn to_string(&self) -> String {
+        String::from(match self {
+            Self::Not => "!",
+            Self::Minus => "-",
+        })
+    }
+}
+#[derive(Debug, PartialEq, Clone)]
+pub enum OperatorToken {
+    Plus,
+    Minus,
+    Equal,
+    NotEqual,
+    Larrow,
+    Rarrow,
+    Mul,
+    Div,
+}
+impl OperatorToken {
+    pub fn to_string(&self) -> String {
+        String::from(match self {
+            Self::Minus => "-",
+            Self::Plus => "+",
+            Self::Mul => "*",
+            Self::Div => "/",
+            Self::Equal => "==",
+            Self::NotEqual => "!=",
+            Self::Rarrow => ">",
+            Self::Larrow => "<",
+        })
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
 pub enum Expression {
     None,
-    Iden(Identifier),
+    Prefix {
+        token: PrefixToken,
+        right: Box<Expression>,
+    },
+    Iden(String),
+    Int(usize),
+    Infix {
+        operator_token: OperatorToken,
+        left: Box<Expression>,
+        right: Box<Expression>,
+    },
 }
 impl Expression {
-    fn to_string(&self) -> String {
-        todo!()
+    pub fn to_string(&self) -> String {
+        match self {
+            Expression::Prefix { token, right } => {
+                format!("({}{})", token.to_string(), right.to_string())
+            }
+            Expression::Infix {
+                operator_token,
+                left,
+                right,
+            } => format!(
+                "({} {} {})",
+                left.to_string(),
+                operator_token.to_string(),
+                right.to_string()
+            ),
+            _ => todo!(),
+        }
+    }
+    pub fn get_int(&self) -> Option<usize> {
+        match self {
+            Self::Int(i) => Some(*i),
+            _ => None,
+        }
     }
 }
 #[derive(Debug)]
@@ -36,15 +120,22 @@ impl Node for Statement {
         }
     }
 }
+impl Statement {
+    pub fn get_expression(&self) -> Option<&ExpressionStatement> {
+        match self {
+            Self::Expression(a) => Some(a),
+            _ => None,
+        }
+    }
+}
 #[derive(Debug)]
 pub struct LetStatement {
-    token: Token,
     name: Identifier,
     value: Expression,
 }
 impl LetStatement {
-    pub fn new(token: Token, name: Identifier, value: Expression) -> LetStatement {
-        LetStatement { token, name, value }
+    pub fn new(name: Identifier, value: Expression) -> LetStatement {
+        LetStatement { name, value }
     }
 }
 impl Node for LetStatement {
@@ -59,7 +150,7 @@ impl Node for LetStatement {
         );
     }
 }
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Identifier(pub String);
 
 impl Node for Identifier {
@@ -73,12 +164,11 @@ impl Node for Identifier {
 
 #[derive(Debug)]
 pub struct ReturnStatement {
-    token: Token,
     expression: Expression,
 }
 impl ReturnStatement {
-    pub fn new(token: Token, expression: Expression) -> ReturnStatement {
-        ReturnStatement { expression, token }
+    pub fn new(expression: Expression) -> ReturnStatement {
+        ReturnStatement { expression }
     }
 }
 impl Node for ReturnStatement {
@@ -89,10 +179,10 @@ impl Node for ReturnStatement {
         format!("return {};", self.expression.to_string())
     }
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ExpressionStatement {
     token: Token,
-    expression: Expression,
+    pub expression: Expression,
 }
 impl ExpressionStatement {
     pub fn new(token: Token, expression: Expression) -> ExpressionStatement {

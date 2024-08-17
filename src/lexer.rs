@@ -134,7 +134,7 @@ impl<'s> LexerIterator<'s> {
                 }
             }
         }
-        let int_: isize = string_to_parse
+        let int_: usize = string_to_parse
             .parse()
             .expect(&*format!("Couldn't parse {} to int", string_to_parse));
         return Token::Intger(int_);

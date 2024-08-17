@@ -1,6 +1,7 @@
-use std::collections::HashMap;
+use anyhow::anyhow;
 
-use crate::ast::Expression;
+use crate::ast::OperatorToken;
+
 #[derive(Debug, PartialEq, Clone, Default, Eq, Hash)]
 pub enum Token {
     EOF,             // end of file
@@ -26,7 +27,7 @@ pub enum Token {
     Larrow,
     Rarrow,
 
-    Intger(isize),
+    Intger(usize),
 
     Assign, // =
     Plus,   // +
@@ -43,69 +44,38 @@ pub enum Token {
     #[default]
     Default,
 }
-
-type PrefixParseFn = Box<dyn Fn(&Token) -> Expression>;
-type InfixParseFn = Box<dyn Fn(&Token, &Expression) -> Expression>;
-
-pub struct TokenMap {
-    prefix_fns: HashMap<usize, PrefixParseFn>,
-    infix_fns: HashMap<usize, InfixParseFn>,
-}
-impl TokenMap {
-    pub fn new() -> TokenMap {
-        TokenMap {
-            prefix_fns: HashMap::with_capacity(28),
-            infix_fns: HashMap::with_capacity(28),
+impl Token {
+    pub fn get_int(&self) -> Option<usize> {
+        match self {
+            Self::Intger(i) => Some(*i),
+            _ => None,
         }
     }
-    pub fn insert_infix(&mut self, token: &Token, fn_: InfixParseFn) -> Option<InfixParseFn> {
-        self.infix_fns.insert(TokenMap::token_index(&token), fn_)
-    }
-    pub fn insert_prefix(&mut self, token: &Token, fn_: PrefixParseFn) -> Option<PrefixParseFn> {
-        self.prefix_fns.insert(TokenMap::token_index(&token), fn_)
-    }
-    pub fn get_prefix(&mut self, token: &Token) -> Option<&PrefixParseFn> {
-        self.prefix_fns.get(&TokenMap::token_index(token))
-    }
-
-    pub fn get_infix(&mut self, token: &Token) -> Option<&InfixParseFn> {
-        self.infix_fns.get(&TokenMap::token_index(token))
-    }
-    fn token_index(token: &Token) -> usize {
-        match token {
-            Token::EOF => 0,
-            Token::Illegal(_) => 1,
-            Token::IDENT(_) => 2,
-            Token::Let => 4,
-            Token::Fn => 5,
-            Token::Return => 6,
-            Token::If => 7,
-            Token::Else => 8,
-            Token::True => 9,
-            Token::False => 10,
-            Token::Equal => 11,
-            Token::Not => 12,
-            Token::NotEqual => 13,
-            Token::Minus => 14,
-            Token::Div => 15,
-            Token::Mul => 16,
-            Token::Larrow => 17,
-            Token::Rarrow => 18,
-            Token::Intger(_) => 19,
-            Token::Assign => 20,
-            Token::Plus => 21,
-            Token::Comma => 22,
-            Token::SemiColon => 23,
-            Token::Lparen => 24,
-            Token::Rparen => 25,
-            Token::Lbrakcet => 26,
-            Token::Rbracket => 27,
-            Token::Default => 28,
+    pub fn get_ident(&self) -> Option<&str> {
+        match self {
+            Self::IDENT(s) => Some(s.as_str()),
+            _ => None,
         }
     }
 }
+impl TryInto<OperatorToken> for &Token {
+    type Error = anyhow::Error;
+    fn try_into(self) -> Result<OperatorToken, Self::Error> {
+        Ok(match *self {
+            Token::Mul => OperatorToken::Mul,
+            Token::Div => OperatorToken::Div,
+            Token::Plus => OperatorToken::Plus,
+            Token::Minus => OperatorToken::Minus,
+            Token::Larrow => OperatorToken::Larrow,
+            Token::Rarrow => OperatorToken::Rarrow,
+            Token::NotEqual => OperatorToken::NotEqual,
+            Token::Equal => OperatorToken::Equal,
+            _ => Err(anyhow!("Can't convert {:?} into operator.", self))?,
+        })
+    }
+}
 
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub enum Precidence {
     Lowest,
     Equals,
@@ -115,8 +85,19 @@ pub enum Precidence {
     Prefix,
     Call,
 }
+impl From<&Token> for Precidence {
+    fn from(value: &Token) -> Self {
+        match *value {
+            Token::Equal | Token::NotEqual => Precidence::Equals,
+            Token::Rarrow | Token::Larrow => Precidence::LessGreater,
+            Token::Plus | Token::Minus => Precidence::Sum,
+            Token::Mul | Token::Div => Precidence::Product,
+            _ => Precidence::Lowest,
+        }
+    }
+}
 mod test {
-    use crate::token::Precidence;
+    use super::*;
 
     #[test]
     fn test_precidence() {
@@ -126,5 +107,10 @@ mod test {
         assert!(Precidence::Sum < Precidence::Product);
         assert!(Precidence::Product < Precidence::Prefix);
         assert!(Precidence::Prefix < Precidence::Call);
+    }
+    #[test]
+    fn test_into_prec() {
+        let m: Precidence = (&Token::Mul).into();
+        assert_eq!(m, Precidence::Product)
     }
 }

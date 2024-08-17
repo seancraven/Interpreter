@@ -1,12 +1,11 @@
-use std::collections::HashMap;
-
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 
 use crate::ast::{
-    Expression, ExpressionStatement, Identifier, LetStatement, ReturnStatement, Statement,
+    Expression, ExpressionStatement, Identifier, LetStatement, PrefixToken, ReturnStatement,
+    Statement,
 };
 use crate::lexer::{Lexer, LexerIterator};
-use crate::token::{Precidence, Token, TokenMap};
+use crate::token::{Precidence, Token};
 
 pub struct Program {
     pub statements: Vec<Statement>,
@@ -16,40 +15,76 @@ pub struct Parser<'s> {
     l: LexerIterator<'s>,
     current_token: Token,
     next_token: Token,
-    tm: TokenMap,
 }
 impl<'s> Parser<'s> {
     pub fn new(lexer: &'s Lexer) -> Parser<'s> {
         let mut l = lexer.into_iter();
         let current_token = l.next().unwrap();
         let next_token = l.next().unwrap();
-        let mut tm = TokenMap::new();
-        tm.insert_prefix(&Token::IDENT(String::new()), Box::new(Parser::parse_ident));
         Parser {
             l,
             current_token,
             next_token,
-            tm,
         }
     }
-    fn parse_ident(t: &Token) -> Expression {
-        match t.clone() {
-            Token::IDENT(s) => Expression::Iden(Identifier(s.clone())),
-            _ => panic!("Tried parsing identifier, but the current token isn't an identifier."),
+    fn parse_infix(&mut self, left: Box<Expression>) -> anyhow::Result<Expression> {
+        let prec = self.current_token_precidence();
+        let operator_token = (&self.current_token).try_into()?;
+        self.next();
+        let right = Box::new(self.parse_expression(prec)?);
+
+        Ok(Expression::Infix {
+            operator_token,
+            left,
+            right,
+        })
+    }
+    fn parse_prefix(&mut self) -> anyhow::Result<Expression> {
+        match &self.current_token {
+            Token::Intger(i) => Ok(Expression::Int(*i)),
+            Token::IDENT(s) => Ok(Expression::Iden(s.to_owned())),
+            Token::Minus => {
+                self.next();
+                Ok(Expression::Prefix {
+                    token: PrefixToken::Minus,
+                    right: Box::new(self.parse_expression(Precidence::Prefix)?),
+                })
+            }
+            Token::Not => {
+                self.next();
+                Ok(Expression::Prefix {
+                    token: PrefixToken::Not,
+                    right: Box::new(self.parse_expression(Precidence::Prefix)?),
+                })
+            }
+
+            _ => Err(anyhow!(
+                "{:?} isn't implemented prefix operator. Nex token: {:?}",
+                self.current_token,
+                self.next_token
+            )),
         }
     }
-    fn parse_expression(&mut self, p: Precidence) -> Option<Expression> {
-        let Some(prefix) = self.tm.get_prefix(&self.current_token) else {
-            return None;
-        };
-        let left_exp = prefix(&self.current_token);
-        return Some(left_exp);
+    fn parse_expression(&mut self, p: Precidence) -> anyhow::Result<Expression> {
+        let mut left_exp = self.parse_prefix()?;
+        println!("Parsed Prefix: {:?}", left_exp);
+        println!("");
+        println!("Peek prec: {:?}", self.next_token_precidence());
+        while self.next_token != Token::SemiColon || p < self.next_token_precidence() {
+            println!(
+                "Iterating c: {:?}, n: {:?}",
+                self.current_token, self.next_token
+            );
+            left_exp = self.parse_infix(Box::new(left_exp))?;
+            self.next();
+        }
+        Ok(left_exp)
     }
-    fn parse_statement(&mut self) -> anyhow::Result<Option<Statement>> {
+    fn parse_statement(&mut self) -> anyhow::Result<Statement> {
         match self.current_token {
             Token::Let => {
-                let token = std::mem::take(&mut self.current_token);
-                let name = match self.next_token.clone() {
+                self.next();
+                let name = match std::mem::take(&mut self.current_token) {
                     Token::IDENT(i) => Identifier(i),
                     _ => {
                         return Err(anyhow!(
@@ -59,19 +94,14 @@ impl<'s> Parser<'s> {
                     }
                 };
                 self.next();
-                if self.next_token != Token::Assign {
+                if self.current_token != Token::Assign {
                     return Err(anyhow!("Identifier must be followed by assign."));
                 }
                 self.next();
-                self.next();
-                // let value = self
-                //     .parse_expression(Precidence::Lowest)
-                //     .expect("Couldn't parse expression.");
-                let out = Ok(Some(Statement::Let(LetStatement::new(
-                    token,
-                    name,
-                    Expression::None,
-                ))));
+                let value = self
+                    .parse_expression(Precidence::Lowest)
+                    .context("Couldn't parse expression. After let statement")?;
+                let out = Ok(Statement::Let(LetStatement::new(name, value)));
                 while let Some(t) = self.next() {
                     if *t == Token::SemiColon {
                         break;
@@ -80,10 +110,12 @@ impl<'s> Parser<'s> {
                 out
             }
             Token::Return => {
-                let token = std::mem::take(&mut self.current_token);
-                let exp = Expression::None;
-                let out: anyhow::Result<Option<Statement>> =
-                    Ok(Some(Statement::Return(ReturnStatement::new(token, exp))));
+                self.next();
+
+                let exp = self.parse_expression(Precidence::Lowest)?;
+                println!("Expression: {:?}", exp);
+                let out: anyhow::Result<Statement> =
+                    Ok(Statement::Return(ReturnStatement::new(exp)));
                 while let Some(t) = self.next() {
                     if *t == Token::SemiColon {
                         break;
@@ -92,12 +124,10 @@ impl<'s> Parser<'s> {
                 out
             }
             _ => {
-                let Some(exp) = self.parse_expression(Precidence::Lowest) else {
-                    return Ok(None);
-                };
+                let exp = self.parse_expression(Precidence::Lowest)?;
                 let stmt_token = std::mem::take(&mut self.current_token);
                 let stmt = ExpressionStatement::new(stmt_token, exp);
-                return Ok(Some(Statement::Expression(stmt)));
+                return Ok(Statement::Expression(stmt));
             }
         }
     }
@@ -119,8 +149,7 @@ impl<'s> Parser<'s> {
         let mut errors = vec![];
         while self.current_token != Token::EOF {
             match self.parse_statement() {
-                Ok(None) => (),
-                Ok(Some(s)) => statements.push(s),
+                Ok(s) => statements.push(s),
                 Err(e) => {
                     eprintln!("{}", e);
                     errors.push(e);
@@ -129,6 +158,12 @@ impl<'s> Parser<'s> {
             self.next();
         }
         Ok(Program { statements, errors })
+    }
+    fn current_token_precidence(&self) -> Precidence {
+        (&self.current_token).into()
+    }
+    fn next_token_precidence(&self) -> Precidence {
+        (&self.next_token).into()
     }
 }
 
@@ -155,12 +190,15 @@ mod tests {
             )
         }
     }
+
     #[test]
     fn test_error_parsing() {
-        let input = "let x;\nlet x 5;\nlet = 5;";
-        let lexer = Lexer::new(input);
-        let p = Parser::new(&lexer).parse_program().unwrap();
-        assert_eq!(p.errors.len(), 3, "{:?}", p.errors)
+        let tests = vec!["let x", "let x 5", "let =5"];
+        for t in tests {
+            let lexer = Lexer::new(t);
+            let p = Parser::new(&lexer).parse_program().unwrap();
+            assert!(p.errors.len() > 0, "{:?}", p.errors)
+        }
     }
     #[test]
     fn test_return_statement() {
@@ -177,13 +215,71 @@ mod tests {
     }
     #[test]
     fn test_expression_statement() {
-        let input = "fubar;";
+        let input = "fubar;\n1;";
+        let lexer = Lexer::new(input);
+        let p = Parser::new(&lexer).parse_program().unwrap();
+        assert_eq!(p.statements.len(), 2, "Expected one expression statement.");
+        assert_eq!(
+            p.statements[0].get_expression().unwrap().expression,
+            Expression::Iden(String::from("fubar"))
+        );
+        assert_eq!(
+            p.statements[1].get_expression().unwrap().expression,
+            Expression::Int(1)
+        );
+    }
+    #[test]
+    fn test_expression_statement_int() {
+        let input = "5;";
         let lexer = Lexer::new(input);
         let p = Parser::new(&lexer).parse_program().unwrap();
         assert_eq!(p.statements.len(), 1, "Expected one expression statement.");
-        match p.statements[0] {
-            Statement::Expression(_) => (),
+        match &p.statements[0] {
+            Statement::Expression(a) => assert!(a.expression == Expression::Int(5)),
             _ => panic!("Wrong statement type."),
+        }
+    }
+    #[test]
+    fn test_parse_prefix() {
+        let input = "-5;!10;";
+        let outs = vec![(Token::Minus, 5), (Token::Not, 10)];
+        let lexer = Lexer::new(input);
+        let p = Parser::new(&lexer).parse_program().unwrap();
+        for (stmt, o) in p.statements.iter().zip(outs) {
+            assert_eq!(
+                stmt.get_expression().unwrap().expression,
+                Expression::Prefix {
+                    token: o.0.try_into().unwrap(),
+                    right: Box::new(Expression::Int(o.1))
+                }
+            );
+            assert_eq!(stmt.token_literal().get_int().unwrap(), o.1);
+        }
+    }
+    fn test_infix_result(in_: &str, out: (usize, &str, usize)) {
+        let lexer = Lexer::new(in_);
+        let p = Parser::new(&lexer).parse_program().unwrap();
+        let e = p.statements[0].get_expression().unwrap();
+        match e.expression.clone() {
+            Expression::Infix {
+                operator_token,
+                left,
+                right,
+            } => {
+                assert_eq!(operator_token.to_string(), out.1);
+                assert_eq!(left.get_int().unwrap(), out.0);
+                assert_eq!(right.get_int().unwrap(), out.2);
+            }
+            _ => panic!("{:?} Failed", e),
+        }
+    }
+    #[test]
+    fn test_parse_infix() {
+        // Currently this test is failing because the prefix is parsed, then
+        // next isn't called to advance the parser..
+        let tests = vec![("5+5;", (5, "+", 5))];
+        for (in_, out_) in tests {
+            test_infix_result(in_, out_)
         }
     }
 }
