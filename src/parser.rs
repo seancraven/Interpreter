@@ -67,16 +67,9 @@ impl<'s> Parser<'s> {
     }
     fn parse_expression(&mut self, p: Precidence) -> anyhow::Result<Expression> {
         let mut left_exp = self.parse_prefix()?;
-        println!("Parsed Prefix: {:?}", left_exp);
-        println!("");
-        println!("Peek prec: {:?}", self.next_token_precidence());
         while self.next_token != Token::SemiColon || p < self.next_token_precidence() {
-            println!(
-                "Iterating c: {:?}, n: {:?}",
-                self.current_token, self.next_token
-            );
-            left_exp = self.parse_infix(Box::new(left_exp))?;
             self.next();
+            left_exp = self.parse_infix(Box::new(left_exp))?;
         }
         Ok(left_exp)
     }
@@ -102,25 +95,14 @@ impl<'s> Parser<'s> {
                     .parse_expression(Precidence::Lowest)
                     .context("Couldn't parse expression. After let statement")?;
                 let out = Ok(Statement::Let(LetStatement::new(name, value)));
-                while let Some(t) = self.next() {
-                    if *t == Token::SemiColon {
-                        break;
-                    }
-                }
                 out
             }
             Token::Return => {
                 self.next();
 
                 let exp = self.parse_expression(Precidence::Lowest)?;
-                println!("Expression: {:?}", exp);
                 let out: anyhow::Result<Statement> =
                     Ok(Statement::Return(ReturnStatement::new(exp)));
-                while let Some(t) = self.next() {
-                    if *t == Token::SemiColon {
-                        break;
-                    }
-                }
                 out
             }
             _ => {
@@ -256,7 +238,7 @@ mod tests {
             assert_eq!(stmt.token_literal().get_int().unwrap(), o.1);
         }
     }
-    fn test_infix_result(in_: &str, out: (usize, &str, usize)) {
+    fn test_infix_result(in_: &str, out: (Token, &str, Token)) {
         let lexer = Lexer::new(in_);
         let p = Parser::new(&lexer).parse_program().unwrap();
         let e = p.statements[0].get_expression().unwrap();
@@ -267,17 +249,25 @@ mod tests {
                 right,
             } => {
                 assert_eq!(operator_token.to_string(), out.1);
-                assert_eq!(left.get_int().unwrap(), out.0);
-                assert_eq!(right.get_int().unwrap(), out.2);
+                assert_eq!(left.to_string(), out.0.to_string());
+                assert_eq!(right.to_string(), out.2.to_string());
             }
             _ => panic!("{:?} Failed", e),
         }
     }
     #[test]
     fn test_parse_infix() {
-        // Currently this test is failing because the prefix is parsed, then
-        // next isn't called to advance the parser..
-        let tests = vec![("5+5;", (5, "+", 5))];
+        let tests = vec![
+            ("5+5;", (Token::Intger(5), "+", Token::Intger(5))),
+            (
+                "add * dave;",
+                (
+                    Token::IDENT(String::from("add")),
+                    "*",
+                    Token::IDENT(String::from("dave")),
+                ),
+            ),
+        ];
         for (in_, out_) in tests {
             test_infix_result(in_, out_)
         }

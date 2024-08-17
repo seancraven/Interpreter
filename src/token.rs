@@ -57,6 +57,13 @@ impl Token {
             _ => None,
         }
     }
+    pub fn to_string(&self) -> String {
+        match self {
+            Self::Intger(i) => format!("{}", i),
+            Self::IDENT(i) => format!("{}", i),
+            _ => todo!(),
+        }
+    }
 }
 impl TryInto<OperatorToken> for &Token {
     type Error = anyhow::Error;

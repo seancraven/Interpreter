@@ -1,4 +1,4 @@
-use std::usize;
+use std::{fmt::format, usize};
 
 use anyhow::anyhow;
 
@@ -88,6 +88,8 @@ impl Expression {
                 operator_token.to_string(),
                 right.to_string()
             ),
+            Expression::Int(i) => format!("{}", i),
+            Expression::Iden(i) => format!("{}", i),
             _ => todo!(),
         }
     }
