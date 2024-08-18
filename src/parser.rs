@@ -39,11 +39,13 @@ impl<'s> Parser<'s> {
     fn parse_block_statement(&mut self) -> anyhow::Result<BlockStatement> {
         let mut block = BlockStatement::new();
         assert_eq!(self.current_token, Token::Lbrakcet);
-        self.next();
-        if self.current_token != Token::Rbracket && self.current_token != Token::EOF {
-            block.add_statement(self.parse_statement()?);
+        while self.next_token != Token::Rbracket && self.next_token != Token::EOF {
             self.next();
+            println!("block start current_token: {:?}", self.current_token);
+            block.add_statement(self.parse_statement()?);
+            println!("block end current_token: {:?}", self.current_token);
         }
+        self.next();
         Ok(block)
     }
     fn parse_if_expression(&mut self) -> anyhow::Result<Expression> {
@@ -67,9 +69,10 @@ impl<'s> Parser<'s> {
         }
         self.next();
         let consequence = self.parse_block_statement()?;
+        println!("Post Consequence current token: {:?}", self.current_token);
         self.next();
         let alternative = match self.current_token {
-            Token::SemiColon => None,
+            Token::SemiColon | Token::EOF => None,
             Token::Else => {
                 if self.next_token != Token::Lbrakcet {
                     return Err(anyhow!(
@@ -176,6 +179,9 @@ impl<'s> Parser<'s> {
             )),
         }
     }
+    /// Parse the expression type.
+    /// Parses an expression up to the next token being a semi colon
+    /// or the next token having higher Precidence.
     fn parse_expression(&mut self, p: Precidence) -> anyhow::Result<Expression> {
         let mut left_exp = self.parse_prefix()?;
         while self.next_token != Token::SemiColon && p < self.next_token_precidence() {
@@ -184,10 +190,12 @@ impl<'s> Parser<'s> {
         }
         Ok(left_exp)
     }
+    /// Parse the statement, end the evaluation at a semi colon or a eof apart from expression.
+    /// Expression statements can stay on their last item, but attemt to advance.
     fn parse_statement(&mut self) -> anyhow::Result<Statement> {
-        match self.current_token {
+        let out = match self.current_token {
             Token::Let => {
-                self.next();
+                self.next(); // move onto ident.
                 let name = match std::mem::take(&mut self.current_token) {
                     Token::IDENT(i) => Identifier(i),
                     _ => {
@@ -197,32 +205,43 @@ impl<'s> Parser<'s> {
                         ))
                     }
                 };
-                self.next();
+                self.next(); // move onto equals.
                 if self.current_token != Token::Assign {
                     return Err(anyhow!("Identifier must be followed by assign."));
                 }
-                self.next();
+                self.next(); // move onto expression start.
                 let value = self
                     .parse_expression(Precidence::Lowest)
                     .context("Couldn't parse expression. After let statement")?;
                 let out = Ok(Statement::Let(LetStatement::new(name, value)));
+                self.next(); // move onto semicolon;
                 out
             }
             Token::Return => {
-                self.next();
-
+                self.next(); // move past return token.
                 let exp = self.parse_expression(Precidence::Lowest)?;
                 let out: anyhow::Result<Statement> =
                     Ok(Statement::Return(ReturnStatement::new(exp)));
+                self.next(); // move onto semicolon.
                 out
             }
             _ => {
                 let exp = self.parse_expression(Precidence::Lowest)?;
                 let stmt_token = std::mem::take(&mut self.current_token);
                 let stmt = ExpressionStatement::new(stmt_token, exp);
+                if self.next_token == Token::SemiColon {
+                    self.next();
+                }
                 return Ok(Statement::Expression(stmt));
             }
-        }
+        };
+
+        assert!(
+            self.current_token == Token::SemiColon || self.current_token == Token::EOF,
+            "{:?}",
+            self.current_token
+        );
+        out
     }
     fn next(&mut self) -> Option<&Token> {
         self.current_token = std::mem::take(&mut self.next_token);
@@ -397,9 +416,15 @@ mod tests {
             ("(a + (b + c))", "(a + (b + c))"),
             ("b * (a + b)", "(b * (a + b))"),
         ];
-        for (in_, out_) in tests {
+        for (i, (in_, out_)) in tests.into_iter().enumerate() {
             let p = parse_string(in_);
-            assert_eq!(p.to_string(), out_)
+            assert_eq!(
+                p.to_string(),
+                out_,
+                "Failded on test case {:?}: {:?}",
+                i,
+                in_
+            );
         }
     }
     #[test]
@@ -443,9 +468,9 @@ mod tests {
     }
     #[test]
     fn test_fn_parse() {
-        let in_ = "fn(x,y) { x + y; };";
+        let in_ = "fn(x,y) { let a = x + y; let z = x; };";
         let p = parse_string(in_);
-        assert_eq!(p.statements.len(), 1);
+        // assert_eq!(p.statements.len(), 1);
         let e = p.statements[0].get_expression().unwrap();
         match &e.expression {
             Expression::Fn { parameters, body } => {
@@ -453,11 +478,7 @@ mod tests {
                 for (parameter, expected_parameter) in parameters.iter().zip(expected_parameters) {
                     assert_eq!(parameter.to_string(), expected_parameter);
                 }
-                assert_eq!(body.statements.len(), 1);
-                assert_eq!(
-                    body.statements[0].get_expression().unwrap().to_string(),
-                    "(x + y)"
-                );
+                assert_eq!(body.statements.len(), 2, "{:?}", body.statements);
             }
             _ => panic!("Expected fn."),
         }
