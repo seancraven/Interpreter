@@ -1,5 +1,3 @@
-use std::{fmt::format, usize};
-
 use anyhow::anyhow;
 
 use crate::token::Token;
@@ -56,6 +54,25 @@ impl OperatorToken {
         })
     }
 }
+#[derive(Debug, PartialEq, Clone)]
+pub struct BlockStatement {
+    pub statements: Vec<Statement>,
+}
+impl BlockStatement {
+    pub fn to_string(&self) -> String {
+        let mut out = String::new();
+        for stmt in self.statements.iter() {
+            out.push_str(&*stmt.to_string())
+        }
+        out
+    }
+    pub fn new() -> BlockStatement {
+        BlockStatement { statements: vec![] }
+    }
+    pub fn add_statement(&mut self, statement: Statement) {
+        self.statements.push(statement)
+    }
+}
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Expression {
@@ -64,15 +81,29 @@ pub enum Expression {
         token: PrefixToken,
         right: Box<Expression>,
     },
-    Iden(String),
+    True,
+    False,
+    Iden(Identifier),
     Int(usize),
     Infix {
         operator_token: OperatorToken,
         left: Box<Expression>,
         right: Box<Expression>,
     },
+    If {
+        condition: Box<Expression>,
+        consequnce: Box<BlockStatement>,
+        alternative: Option<Box<BlockStatement>>,
+    },
+    Fn {
+        parameters: Vec<Identifier>,
+        body: Box<BlockStatement>,
+    },
 }
 impl Expression {
+    pub fn iden_from_str(s: impl Into<String>) -> Expression {
+        Expression::Iden(Identifier(s.into()))
+    }
     pub fn to_string(&self) -> String {
         match self {
             Expression::Prefix { token, right } => {
@@ -89,8 +120,34 @@ impl Expression {
                 right.to_string()
             ),
             Expression::Int(i) => format!("{}", i),
-            Expression::Iden(i) => format!("{}", i),
-            _ => todo!(),
+            Expression::Iden(i) => format!("{}", i.to_string()),
+            Expression::True => String::from("true"),
+            Expression::False => String::from("false"),
+            Expression::If {
+                condition,
+                consequnce,
+                alternative,
+            } => match alternative {
+                Some(a) => {
+                    format!(
+                        "if {} {} else {};",
+                        condition.to_string(),
+                        consequnce.to_string(),
+                        a.to_string(),
+                    )
+                }
+                None => format!("if {} {};", condition.to_string(), consequnce.to_string()),
+            },
+            Expression::Fn { parameters, body } => {
+                let s: String = parameters
+                    .iter()
+                    .map(|i| i.to_string())
+                    .collect::<Vec<String>>()
+                    .join(", ");
+                format!("fn({}){{ {} }}", s, body.to_string())
+            }
+
+            Expression::None => String::new(),
         }
     }
     pub fn get_int(&self) -> Option<usize> {
@@ -100,7 +157,7 @@ impl Expression {
         }
     }
 }
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
     Let(LetStatement),
     Return(ReturnStatement),
@@ -130,7 +187,7 @@ impl Statement {
         }
     }
 }
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct LetStatement {
     name: Identifier,
     value: Expression,
@@ -152,7 +209,7 @@ impl Node for LetStatement {
         );
     }
 }
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Identifier(pub String);
 
 impl Node for Identifier {
@@ -164,7 +221,7 @@ impl Node for Identifier {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ReturnStatement {
     expression: Expression,
 }
@@ -181,7 +238,7 @@ impl Node for ReturnStatement {
         format!("return {};", self.expression.to_string())
     }
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ExpressionStatement {
     token: Token,
     pub expression: Expression,
