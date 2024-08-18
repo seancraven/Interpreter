@@ -46,6 +46,7 @@ impl<'s> Parser<'s> {
             println!("block end current_token: {:?}", self.current_token);
         }
         self.next();
+        assert_eq!(self.current_token, Token::Rbracket);
         Ok(block)
     }
     fn parse_if_expression(&mut self) -> anyhow::Result<Expression> {
