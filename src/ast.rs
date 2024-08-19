@@ -1,10 +1,11 @@
 use anyhow::anyhow;
 
+use crate::object::Object;
 use crate::token::Token;
 
 pub trait Node {
-    fn token_literal(&self) -> Token;
     fn to_string(&self) -> String;
+    fn to_object(&self) -> Object;
 }
 #[derive(Debug, PartialEq, Clone)]
 pub enum PrefixToken {
@@ -99,12 +100,24 @@ pub enum Expression {
         parameters: Vec<Identifier>,
         body: Box<BlockStatement>,
     },
+    Call {
+        name: Identifier,
+        variables: Vec<Box<Expression>>,
+    },
 }
 impl Expression {
     pub fn iden_from_str(s: impl Into<String>) -> Expression {
         Expression::Iden(Identifier(s.into()))
     }
-    pub fn to_string(&self) -> String {
+    pub fn get_int(&self) -> Option<usize> {
+        match self {
+            Self::Int(i) => Some(*i),
+            _ => None,
+        }
+    }
+}
+impl Node for Expression {
+    fn to_string(&self) -> String {
         match self {
             Expression::Prefix { token, right } => {
                 format!("({}{})", token.to_string(), right.to_string())
@@ -146,113 +159,61 @@ impl Expression {
                     .join(", ");
                 format!("fn({}){{ {} }}", s, body.to_string())
             }
-
+            Expression::Call { name, variables } => {
+                let s: String = variables
+                    .iter()
+                    .map(|i| i.to_string())
+                    .collect::<Vec<String>>()
+                    .join(", ");
+                format!("{}({})", name.to_string(), s)
+            }
             Expression::None => String::new(),
         }
     }
-    pub fn get_int(&self) -> Option<usize> {
-        match self {
-            Self::Int(i) => Some(*i),
-            _ => None,
-        }
+    fn to_object(&self) -> Object {
+        todo!();
     }
 }
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
-    Let(LetStatement),
-    Return(ReturnStatement),
-    Expression(ExpressionStatement),
+    Let(Identifier, Expression),
+    Return(Expression),
+    Expression(Expression),
 }
 impl Node for Statement {
-    fn token_literal(&self) -> Token {
-        match self {
-            Self::Let(s) => s.token_literal(),
-            Self::Return(s) => s.token_literal(),
-            Self::Expression(s) => s.token_literal(),
-        }
-    }
     fn to_string(&self) -> String {
         match self {
-            Self::Let(s) => s.to_string(),
+            Self::Let(_, e) => e.to_string(),
             Self::Return(s) => s.to_string(),
             Self::Expression(s) => s.to_string(),
         }
     }
+    fn to_object(&self) -> Object {
+        todo!();
+    }
 }
 impl Statement {
-    pub fn get_expression(&self) -> Option<&ExpressionStatement> {
+    pub fn get_expression(&self) -> Option<&Expression> {
         match self {
             Self::Expression(a) => Some(a),
             _ => None,
         }
     }
-}
-#[derive(Debug, PartialEq, Clone)]
-pub struct LetStatement {
-    name: Identifier,
-    value: Expression,
-}
-impl LetStatement {
-    pub fn new(name: Identifier, value: Expression) -> LetStatement {
-        LetStatement { name, value }
-    }
-}
-impl Node for LetStatement {
-    fn token_literal(&self) -> Token {
-        Token::IDENT(self.name.0.clone())
-    }
-    fn to_string(&self) -> String {
-        return format!(
-            "let {} = {}",
-            &self.name.to_string(),
-            self.value.to_string(),
-        );
+    pub fn get_let(&self) -> Option<&Expression> {
+        match self {
+            Self::Let(_, a) => Some(a),
+            _ => None,
+        }
     }
 }
 #[derive(Debug, PartialEq, Clone)]
 pub struct Identifier(pub String);
 
 impl Node for Identifier {
-    fn token_literal(&self) -> Token {
-        Token::IDENT(self.0.clone())
-    }
     fn to_string(&self) -> String {
         self.0.clone()
     }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct ReturnStatement {
-    expression: Expression,
-}
-impl ReturnStatement {
-    pub fn new(expression: Expression) -> ReturnStatement {
-        ReturnStatement { expression }
-    }
-}
-impl Node for ReturnStatement {
-    fn token_literal(&self) -> Token {
-        Token::Return
-    }
-    fn to_string(&self) -> String {
-        format!("return {};", self.expression.to_string())
-    }
-}
-#[derive(Debug, Clone, PartialEq)]
-pub struct ExpressionStatement {
-    token: Token,
-    pub expression: Expression,
-}
-impl ExpressionStatement {
-    pub fn new(token: Token, expression: Expression) -> ExpressionStatement {
-        ExpressionStatement { token, expression }
-    }
-}
-impl Node for ExpressionStatement {
-    fn token_literal(&self) -> Token {
-        self.token.clone()
-    }
-    fn to_string(&self) -> String {
-        format!("{}", self.expression.to_string())
+    fn to_object(&self) -> Object {
+        todo!()
     }
 }

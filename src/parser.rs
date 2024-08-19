@@ -1,23 +1,24 @@
 use anyhow::{anyhow, Context};
 
-use crate::ast::{
-    BlockStatement, Expression, ExpressionStatement, Identifier, LetStatement, Node, PrefixToken,
-    ReturnStatement, Statement,
-};
+use crate::ast::{BlockStatement, Expression, Identifier, Node, PrefixToken, Statement};
 use crate::lexer::{Lexer, LexerIterator};
 use crate::token::{Precidence, Token};
 
+#[derive(Debug)]
 pub struct Program {
     pub statements: Vec<Statement>,
     pub errors: Vec<anyhow::Error>,
 }
-impl Program {
-    pub fn to_string(&self) -> String {
+impl Node for Program {
+    fn to_string(&self) -> String {
         let mut out = String::new();
         for stmt in self.statements.iter() {
             out.push_str(&stmt.to_string());
         }
         out
+    }
+    fn to_object(&self) -> crate::object::Object {
+        todo!();
     }
 }
 pub struct Parser<'s> {
@@ -36,14 +37,34 @@ impl<'s> Parser<'s> {
             next_token,
         }
     }
+    fn parse_call_statement(&mut self) -> anyhow::Result<Expression> {
+        assert_eq!(self.next_token, Token::Lparen);
+        let cur_token = std::mem::take(&mut self.current_token);
+        let name = match cur_token {
+            Token::IDENT(i) => Identifier(i),
+            _ => panic!(
+                "Parse call statements must be called on identifier got {:?}",
+                cur_token
+            ),
+        };
+        let mut variables = vec![];
+        self.next(); // advance to (.
+        while self.next_token != Token::Rparen && self.next_token != Token::EOF {
+            self.next(); // advance to iden.
+            variables.push(Box::new(self.parse_expression(Precidence::Lowest)?));
+            if self.next_token == Token::Comma {
+                self.next(); // advance past comma.
+            }
+        }
+        self.next(); // advance to ).
+        Ok(Expression::Call { name, variables })
+    }
     fn parse_block_statement(&mut self) -> anyhow::Result<BlockStatement> {
         let mut block = BlockStatement::new();
         assert_eq!(self.current_token, Token::Lbrakcet);
         while self.next_token != Token::Rbracket && self.next_token != Token::EOF {
             self.next();
-            println!("block start current_token: {:?}", self.current_token);
             block.add_statement(self.parse_statement()?);
-            println!("block end current_token: {:?}", self.current_token);
         }
         self.next();
         assert_eq!(self.current_token, Token::Rbracket);
@@ -69,7 +90,9 @@ impl<'s> Parser<'s> {
             ));
         }
         self.next();
-        let consequence = self.parse_block_statement()?;
+        let consequence = self
+            .parse_block_statement()
+            .context("parsing block statement failed.")?;
         println!("Post Consequence current token: {:?}", self.current_token);
         self.next();
         let alternative = match self.current_token {
@@ -82,7 +105,10 @@ impl<'s> Parser<'s> {
                     ));
                 };
                 self.next();
-                Some(Box::new(self.parse_block_statement()?))
+                Some(Box::new(
+                    self.parse_block_statement()
+                        .context("parsing block statement failed.")?,
+                ))
             }
             _ => Err(anyhow!(
                 "If consequence, must be followed by an else expression or a SemiColon, got {:?}",
@@ -123,7 +149,9 @@ impl<'s> Parser<'s> {
         self.next();
         assert_eq!(self.current_token, Token::Rparen);
         self.next();
-        let block = self.parse_block_statement()?;
+        let block = self
+            .parse_block_statement()
+            .context("Parsing block statement failed.")?;
         Ok(Expression::Fn {
             parameters,
             body: Box::new(block),
@@ -153,7 +181,10 @@ impl<'s> Parser<'s> {
     fn parse_prefix(&mut self) -> anyhow::Result<Expression> {
         match &self.current_token {
             Token::Intger(i) => Ok(Expression::Int(*i)),
-            Token::IDENT(s) => Ok(Expression::iden_from_str(s)),
+            Token::IDENT(s) => match self.next_token {
+                Token::Lparen => self.parse_call_statement(),
+                _ => Ok(Expression::iden_from_str(s)),
+            },
             Token::True => Ok(Expression::True),
             Token::False => Ok(Expression::False),
             Token::Minus => {
@@ -184,10 +215,14 @@ impl<'s> Parser<'s> {
     /// Parses an expression up to the next token being a semi colon
     /// or the next token having higher Precidence.
     fn parse_expression(&mut self, p: Precidence) -> anyhow::Result<Expression> {
-        let mut left_exp = self.parse_prefix()?;
+        let mut left_exp = self
+            .parse_prefix()
+            .context("Failed parsing prefix, during expression parsing.")?;
         while self.next_token != Token::SemiColon && p < self.next_token_precidence() {
             self.next();
-            left_exp = self.parse_infix(Box::new(left_exp))?;
+            left_exp = self
+                .parse_infix(Box::new(left_exp))
+                .context("Failed parsing infix, during expression parsing.")?;
         }
         Ok(left_exp)
     }
@@ -211,37 +246,39 @@ impl<'s> Parser<'s> {
                     return Err(anyhow!("Identifier must be followed by assign."));
                 }
                 self.next(); // move onto expression start.
-                let value = self
+                let expression = self
                     .parse_expression(Precidence::Lowest)
-                    .context("Couldn't parse expression. After let statement")?;
-                let out = Ok(Statement::Let(LetStatement::new(name, value)));
+                    .context("During parsing let statement")?;
+                let out = Ok(Statement::Let(name, expression));
                 self.next(); // move onto semicolon;
                 out
             }
             Token::Return => {
                 self.next(); // move past return token.
-                let exp = self.parse_expression(Precidence::Lowest)?;
-                let out: anyhow::Result<Statement> =
-                    Ok(Statement::Return(ReturnStatement::new(exp)));
+                let exp = self
+                    .parse_expression(Precidence::Lowest)
+                    .context("During parsing return statament.")?;
+                let out: anyhow::Result<Statement> = Ok(Statement::Return(exp));
                 self.next(); // move onto semicolon.
                 out
             }
             _ => {
-                let exp = self.parse_expression(Precidence::Lowest)?;
-                let stmt_token = std::mem::take(&mut self.current_token);
-                let stmt = ExpressionStatement::new(stmt_token, exp);
+                let exp = self
+                    .parse_expression(Precidence::Lowest)
+                    .context("During parsing expression statement.")?;
                 if self.next_token == Token::SemiColon {
                     self.next();
                 }
-                return Ok(Statement::Expression(stmt));
+                return Ok(Statement::Expression(exp));
             }
         };
 
-        assert!(
-            self.current_token == Token::SemiColon || self.current_token == Token::EOF,
-            "{:?}",
-            self.current_token
-        );
+        // if self.current_token == Token::SemiColon || self.current_token == Token::EOF {
+        //     Err(anyhow!(
+        //         "Invalid final token, expected a ; or the end of a file. Got {:?}",
+        //         self.current_token
+        //     ));
+        // }
         out
     }
     fn next(&mut self) -> Option<&Token> {
@@ -294,18 +331,28 @@ mod tests {
         let lexer = Lexer::new(in_);
         Parser::new(&lexer).parse_program().unwrap()
     }
+    #[test]
+    fn test_let_statemnt() {
+        let in_ = "let x = 5;";
+        let p = parse_string(in_);
+        assert_eq!(p.statements[0].get_let().unwrap().to_string(), "5");
+    }
 
     #[test]
-    fn test_let_statement() {
+    fn test_let_statements() {
         let in_ = "let x = 5;\nlet y = 10;\nlet boobies = 500535;";
+        let out = vec!["5", "10", "500535"];
         let p = parse_string(in_);
         assert_eq!(p.statements.len(), 3, "{:?}", p.statements);
         let ident_tests = vec!["x", "y", "boobies"];
-        for (expected_ident, stmt) in ident_tests.iter().zip(p.statements) {
-            assert_eq!(
-                stmt.token_literal(),
-                Token::IDENT(String::from(*expected_ident))
-            )
+        for ((expected_ident, stmt), o) in ident_tests.iter().zip(p.statements).zip(out) {
+            match stmt {
+                Statement::Let(i, e) => {
+                    assert_eq!(i.to_string(), *expected_ident);
+                    assert_eq!(e.to_string(), o);
+                }
+                _ => panic!(),
+            }
         }
     }
 
@@ -320,11 +367,13 @@ mod tests {
     #[test]
     fn test_return_statement() {
         let in_ = "return 5;\nreturn 15;\nreturn x;";
+        let out = vec!["5", "15", "x"];
         let p = parse_string(in_);
+
         assert_eq!(p.statements.len(), 3);
-        for stmt in p.statements {
+        for (stmt, o) in p.statements.iter().zip(out) {
             match stmt {
-                Statement::Return(_) => (),
+                Statement::Return(r) => assert_eq!(r.to_string(), o),
                 _ => panic!("Wrong statement type."),
             }
         }
@@ -335,11 +384,11 @@ mod tests {
         let p = parse_string(in_);
         assert_eq!(p.statements.len(), 2, "Expected one expression statement.");
         assert_eq!(
-            p.statements[0].get_expression().unwrap().expression,
+            *p.statements[0].get_expression().unwrap(),
             Expression::iden_from_str("fubar")
         );
         assert_eq!(
-            p.statements[1].get_expression().unwrap().expression,
+            *p.statements[1].get_expression().unwrap(),
             Expression::Int(1)
         );
     }
@@ -349,7 +398,7 @@ mod tests {
         let p = parse_string(in_);
         assert_eq!(p.statements.len(), 1, "Expected one expression statement.");
         match &p.statements[0] {
-            Statement::Expression(a) => assert!(a.expression == Expression::Int(5)),
+            Statement::Expression(a) => assert!(*a == Expression::Int(5)),
             _ => panic!("Wrong statement type."),
         }
     }
@@ -360,19 +409,18 @@ mod tests {
         let p = parse_string(in_);
         for (stmt, o) in p.statements.iter().zip(outs) {
             assert_eq!(
-                stmt.get_expression().unwrap().expression,
+                *stmt.get_expression().unwrap(),
                 Expression::Prefix {
                     token: o.0.try_into().unwrap(),
                     right: Box::new(Expression::Int(o.1))
                 }
             );
-            assert_eq!(stmt.token_literal().get_int().unwrap(), o.1);
         }
     }
     fn test_infix_result(in_: &str, out: (Token, &str, Token)) {
         let p = parse_string(in_);
         let e = p.statements[0].get_expression().unwrap();
-        match e.expression.clone() {
+        match e.clone() {
             Expression::Infix {
                 operator_token,
                 left,
@@ -406,6 +454,7 @@ mod tests {
     fn test_parse_precidence() {
         let tests = vec![
             ("-a * b;", "((-a) * b)"),
+            ("add(a + b, c) * d", "(add((a + b), c) * d)"),
             ("a + b + c", "((a + b) + c)"),
             ("a - b * c", "(a - (b * c))"),
             ("a * b + c / e * f", "((a * b) + ((c / e) * f))"),
@@ -434,7 +483,7 @@ mod tests {
         let p = parse_string(in_);
         assert_eq!(p.statements.len(), 1);
         let if_ = p.statements[0].get_expression().unwrap();
-        match if_.expression.clone() {
+        match if_.clone() {
             Expression::If {
                 condition,
                 consequnce,
@@ -443,6 +492,7 @@ mod tests {
                 assert_eq!(condition.to_string(), "(x < y)");
                 assert_eq!(consequnce.statements.len(), 1);
                 assert_eq!(consequnce.to_string(), String::from("x"));
+                assert!(alternative.is_none());
             }
             _ => panic!("shoudl be if."),
         }
@@ -453,7 +503,7 @@ mod tests {
         let p = parse_string(in_);
         assert_eq!(p.statements.len(), 1);
         let if_ = p.statements[0].get_expression().unwrap();
-        match if_.expression.clone() {
+        match if_.clone() {
             Expression::If {
                 condition,
                 consequnce,
@@ -469,23 +519,23 @@ mod tests {
     }
     #[test]
     fn test_fn_parse() {
-        let in_ = "fn(x,y) { let a = x + y; let z = x; };";
+        let in_ = "fn(x,y) { let a = x + y; let z = x; return z; };";
         let p = parse_string(in_);
         // assert_eq!(p.statements.len(), 1);
         let e = p.statements[0].get_expression().unwrap();
-        match &e.expression {
+        match &e {
             Expression::Fn { parameters, body } => {
                 let expected_parameters = vec!["x", "y"];
                 for (parameter, expected_parameter) in parameters.iter().zip(expected_parameters) {
                     assert_eq!(parameter.to_string(), expected_parameter);
                 }
-                assert_eq!(body.statements.len(), 2, "{:?}", body.statements);
+                assert_eq!(body.statements.len(), 3, "{:?}", body.statements);
             }
             _ => panic!("Expected fn."),
         }
     }
-    fn test_parameters(e: &ExpressionStatement, out: Vec<&str>) {
-        match &e.expression {
+    fn test_parameters(e: &Expression, out: Vec<&str>) {
+        match &e {
             Expression::Fn { parameters, body } => {
                 for (p, o) in parameters.iter().zip(out) {
                     assert_eq!(p.to_string(), o)
@@ -507,6 +557,38 @@ mod tests {
             let p = parse_string(in_);
             let e = p.statements[0].get_expression().unwrap();
             test_parameters(e, out);
+        }
+    }
+    #[test]
+    fn test_call_parse_expressions() {
+        let tests = vec![
+            "test(x, y)",
+            "test()",
+            "test(1 + 2, a)",
+            "test(a, 1 + 2 * 3)",
+        ];
+        for t in tests {
+            let p = parse_string(t);
+            let e = p.statements[0].get_expression().unwrap();
+            match e.clone() {
+                Expression::Call { name, variables } => assert_eq!(name.to_string(), "test"),
+                _ => panic!(),
+            };
+        }
+    }
+    #[test]
+    fn test_call_parse() {
+        let in_ = "test(x, y)";
+        let var = vec!["x", "y"];
+        let p = parse_string(in_);
+        match p.statements[0].get_expression().unwrap().clone() {
+            Expression::Call { name, variables } => {
+                assert_eq!(name.to_string(), "test");
+                for (var, out) in variables.iter().zip(var) {
+                    assert_eq!(var.to_string(), out);
+                }
+            }
+            _ => panic!(),
         }
     }
 }

@@ -99,6 +99,7 @@ impl From<&Token> for Precidence {
             Token::Rarrow | Token::Larrow => Precidence::LessGreater,
             Token::Plus | Token::Minus => Precidence::Sum,
             Token::Mul | Token::Div => Precidence::Product,
+            Token::Lparen => Precidence::Call,
             _ => Precidence::Lowest,
         }
     }
