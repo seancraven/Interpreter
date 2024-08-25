@@ -1,26 +1,9 @@
-use anyhow::{anyhow, Context};
+use anyhow::{anyhow, bail, Context};
 
-use crate::ast::{BlockStatement, Expression, Identifier, Node, PrefixToken, Statement};
+use crate::ast::{BlockStatement, Expression, Identifier, Node, PrefixToken, Program, Statement};
 use crate::lexer::{Lexer, LexerIterator};
 use crate::token::{Precidence, Token};
 
-#[derive(Debug)]
-pub struct Program {
-    pub statements: Vec<Statement>,
-    pub errors: Vec<anyhow::Error>,
-}
-impl Node for Program {
-    fn to_string(&self) -> String {
-        let mut out = String::new();
-        for stmt in self.statements.iter() {
-            out.push_str(&stmt.to_string());
-        }
-        out
-    }
-    fn to_object(&self) -> crate::object::Object {
-        todo!();
-    }
-}
 pub struct Parser<'s> {
     l: LexerIterator<'s>,
     current_token: Token,
@@ -57,6 +40,7 @@ impl<'s> Parser<'s> {
             }
         }
         self.next(); // advance to ).
+        assert_eq!(self.current_token, Token::Rparen);
         Ok(Expression::Call { name, variables })
     }
     fn parse_block_statement(&mut self) -> anyhow::Result<BlockStatement> {
@@ -76,18 +60,12 @@ impl<'s> Parser<'s> {
         }
         self.next();
         let condition = self.parse_expression(Precidence::Lowest)?;
-        if self.next_token != Token::Rparen {
-            return Err(anyhow!(
-                "If expressions must contain full conditions ending in a ) got {:?}.",
-                self.next_token
-            ));
-        }
-        self.next();
-        if self.next_token != Token::Lbrakcet {
-            return Err(anyhow!(
-                "If (condition) must be followed by a {{ got {:?}.",
-                self.next_token
-            ));
+        if self.next_token != Token::Lbrakcet && self.current_token == Token::Rparen {
+            bail!(
+                "If (condition) {{}} must be followed by a {{ got {:?}, then {:?}.",
+                self.current_token,
+                self.next_token,
+            );
         }
         self.next();
         let consequence = self
@@ -165,6 +143,7 @@ impl<'s> Parser<'s> {
                 "Expression expected to be followed by a right parenthesis. Exp: {:?} folloewd by {:?}", exp.to_string(), self.next_token
             ));
         }
+        self.next();
         Ok(exp)
     }
     fn parse_infix(&mut self, left: Box<Expression>) -> anyhow::Result<Expression> {
@@ -460,6 +439,7 @@ mod tests {
             ("a * b + c / e * f", "((a * b) + ((c / e) * f))"),
             ("3 + 4; -5 * 5", "(3 + 4)((-5) * 5)"),
             ("!-a", "(!(-a))"),
+            ("(a + b) * c", "((a + b) * c)"),
             ("5 < 4 == 3 > 4", "((5 < 4) == (3 > 4))"),
             ("!true", "(!true)"),
             ("!true == false", "((!true) == false)"),
@@ -471,9 +451,10 @@ mod tests {
             assert_eq!(
                 p.to_string(),
                 out_,
-                "Failded on test case {:?}: {:?}",
+                "Failded on test case {:?}: {:?}, {:?}",
                 i,
-                in_
+                in_,
+                p.statements[0].get_expression()
             );
         }
     }
