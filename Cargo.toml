@@ -1,8 +1,11 @@
 [package]
 name = "monkey_interpreter"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
-anyhow = "1.0.86"
+anyhow = { version = "1.0.86", features = ["backtrace"] }
+clap = { version = "4.5.57", features = ["derive"] }
+env_logger = "0.11.8"
+log = "0.4.29"
 thiserror = "1.0.63"
