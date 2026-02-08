@@ -1,4 +1,4 @@
-use anyhow::{anyhow, bail, Context};
+use anyhow::{Context, anyhow, bail};
 
 use crate::ast::{BlockStatement, Expression, Identifier, Node, PrefixToken, Program, Statement};
 use crate::lexer::{Lexer, LexerIterator};
@@ -19,6 +19,11 @@ impl<'s> Parser<'s> {
             current_token,
             next_token,
         }
+    }
+    pub fn parse(input: impl Into<String>) -> anyhow::Result<Program> {
+        let lexer = Lexer::new(input);
+        let mut p = Parser::new(&lexer);
+        p.parse_program()
     }
     fn parse_call_statement(&mut self) -> anyhow::Result<Expression> {
         assert_eq!(self.next_token, Token::Lparen);
@@ -140,7 +145,9 @@ impl<'s> Parser<'s> {
         let exp = self.parse_expression(Precidence::Lowest)?;
         if self.next_token != Token::Rparen {
             return Err(anyhow!(
-                "Expression expected to be followed by a right parenthesis. Exp: {:?} folloewd by {:?}", exp.to_string(), self.next_token
+                "Expression expected to be followed by a right parenthesis. Exp: {:?} folloewd by {:?}",
+                exp.to_string(),
+                self.next_token
             ));
         }
         self.next();
@@ -217,7 +224,7 @@ impl<'s> Parser<'s> {
                         return Err(anyhow!(
                             "Let must be followed by identifier. Got {:?}",
                             self.current_token
-                        ))
+                        ));
                     }
                 };
                 self.next(); // move onto equals.

@@ -1,23 +1,34 @@
 use core::str;
 
-use anyhow::anyhow ;
+use anyhow::anyhow;
+use log::debug;
 
+use crate::code::Op;
+use crate::compiler::Compiler;
 use crate::object::{Environment, FnObject, Object, OjbectError};
 use crate::token::Token;
 
 pub trait Node {
     fn to_string(&self) -> String;
     fn to_object(&self, e: &mut Environment) -> anyhow::Result<Object>;
+    fn add_bytecode_to_compiler(&self, c: &mut Compiler) -> anyhow::Result<()>;
 }
-fn objectify_ordered_statements(v: &Vec<Statement>, e: &mut Environment) -> anyhow::Result<Object> {
+fn objectify_ordered_statements(s: &[Statement], e: &mut Environment) -> anyhow::Result<Object> {
     let mut result = Object::Null;
-    for stmt in v.iter() {
+    for stmt in s.iter() {
         if let Statement::Return(x) = stmt {
             return x.to_object(e);
         }
         result = stmt.to_object(e)?
     }
     Ok(result)
+}
+
+fn compile_orderd_statements(s: &[Statement], c: &mut Compiler) -> anyhow::Result<()> {
+    for stmt in s {
+        stmt.add_bytecode_to_compiler(c)?;
+    }
+    Ok(())
 }
 #[derive(Debug)]
 pub struct Program {
@@ -32,8 +43,11 @@ impl Node for Program {
         }
         out
     }
-    fn to_object(&self, e: &mut Environment ) -> anyhow::Result<Object> {
+    fn to_object(&self, e: &mut Environment) -> anyhow::Result<Object> {
         objectify_ordered_statements(&self.statements, e)
+    }
+    fn add_bytecode_to_compiler(&self, c: &mut Compiler) -> anyhow::Result<()> {
+        compile_orderd_statements(&self.statements, c)
     }
 }
 #[derive(Debug, PartialEq, Clone)]
@@ -106,6 +120,9 @@ impl Node for BlockStatement {
     }
     fn to_object(&self, e: &mut Environment) -> anyhow::Result<Object> {
         objectify_ordered_statements(&self.statements, e)
+    }
+    fn add_bytecode_to_compiler(&self, c: &mut Compiler) -> anyhow::Result<()> {
+        compile_orderd_statements(&self.statements, c)
     }
 }
 
@@ -212,8 +229,10 @@ impl Node for Expression {
             Expression::Prefix { token, right } => match (token, right.to_object(e)?) {
                 (PrefixToken::Not, Object::Bool(b)) => Ok(Object::Bool(!b)),
                 (PrefixToken::Minus, Object::Int(i)) => Ok(Object::Int(-i)),
-                _ => Err(anyhow::Error::new(OjbectError::UnknownOperator { left: right.to_object(e)?, operator: token.clone() })),
-                
+                _ => Err(anyhow::Error::new(OjbectError::UnknownOperator {
+                    left: right.to_object(e)?,
+                    operator: token.clone(),
+                })),
             },
             // Would make OperatorToken implement infix, then adding new operators is easy.
             Expression::Infix {
@@ -265,15 +284,15 @@ impl Node for Expression {
                 | (_, OperatorToken::NotEqual, Object::Bool(_)) => Ok(Object::Bool(true)),
                 (Object::Null, OperatorToken::NotEqual, _)
                 | (_, OperatorToken::NotEqual, Object::Null) => Ok(Object::Bool(true)),
-                (Object::Str(s), OperatorToken::NotEqual, _)
-                | (_, OperatorToken::NotEqual, Object::Str(s)) => Ok(Object::Bool(true)),
+                (Object::Str(_), OperatorToken::NotEqual, _)
+                | (_, OperatorToken::NotEqual, Object::Str(_)) => Ok(Object::Bool(true)),
                 _=> Err(
-                    anyhow::Error::new(OjbectError::TypeMismatch { 
-                        left: left.to_object(e)?, 
-                        right: right.to_object(e)?, 
-                        operator: operator_token.clone() 
+                    anyhow::Error::new(OjbectError::TypeMismatch {
+                        left: left.to_object(e)?,
+                        right: right.to_object(e)?,
+                        operator: operator_token.clone()
                     })),
-            }
+            },
             Expression::If {
                 condition,
                 consequnce,
@@ -297,20 +316,20 @@ impl Node for Expression {
                     return Ok(Object::Null);
                 };
                 Ok(o.clone())
-
             }
-            Expression::Fn { parameters, body } => {
-                Ok(Object::Fn (FnObject{ variables: parameters.clone(), body: body.clone() , env: Environment::new() }))
-                    
-            }
+            Expression::Fn { parameters, body } => Ok(Object::Fn(FnObject {
+                variables: parameters.clone(),
+                body: body.clone(),
+                env: Environment::new(),
+            })),
             Expression::Call { name, variables } => {
-                let Some(fn_ )= e.get(name) else {
+                let Some(fn_) = e.get(name) else {
                     return Err(anyhow!("No variable {}", name.0));
                 };
                 let Some(mut fn_) = fn_.get_fn() else {
-                    return Err(anyhow!("No function found with Identifier {}", name.0))
+                    return Err(anyhow!("No function found with Identifier {}", name.0));
                 };
-                for (idn, var,) in fn_.variables.into_iter().zip(variables) {
+                for (idn, var) in fn_.variables.into_iter().zip(variables) {
                     fn_.env.insert(idn, var.to_object(e)?);
                 }
                 for (idn, var) in e.store.iter() {
@@ -319,8 +338,31 @@ impl Node for Expression {
                 fn_.body.to_object(&mut fn_.env)
             }
 
-
             _ => todo!(),
+        }
+    }
+    fn add_bytecode_to_compiler(&self, c: &mut Compiler) -> anyhow::Result<()> {
+        match self {
+            Expression::Infix {
+                operator_token,
+                left,
+                right,
+            } => {
+                println!("Expression compiling");
+                left.add_bytecode_to_compiler(c)?;
+                right.add_bytecode_to_compiler(c)?;
+                Ok(())
+            }
+            Expression::Int(i) => {
+                // NOTE: This clearly doesn't handle large ints.
+                println!("Int compiling {:?}", i);
+                let index = c.add_constant(Object::Int(*i as isize));
+                c.emit_bytecode(Op::Constant, &[index]);
+                Ok(())
+            }
+            _ => {
+                todo!();
+            }
         }
     }
 }
@@ -346,7 +388,16 @@ impl Node for Statement {
                 let o = x.to_object(e)?;
                 e.insert(i.clone(), o);
                 Ok(Object::Null)
-            },
+            }
+        }
+    }
+    fn add_bytecode_to_compiler(&self, e: &mut Compiler) -> anyhow::Result<()> {
+        match self {
+            Self::Expression(x) => x.add_bytecode_to_compiler(e),
+            Self::Return(x) => x.add_bytecode_to_compiler(e),
+            Self::Let(i, x) => {
+                todo!();
+            }
         }
     }
 }
@@ -366,13 +417,13 @@ impl Statement {
 }
 #[derive(Debug, PartialEq, Clone, Hash, Eq)]
 pub struct Identifier(pub String);
-impl From<String> for Identifier{
+impl From<String> for Identifier {
     fn from(value: String) -> Self {
         Identifier(value)
     }
 }
 impl From<&str> for Identifier {
-    fn from(value: &str)  -> Identifier {
+    fn from(value: &str) -> Identifier {
         Identifier(value.to_string())
     }
 }
@@ -382,6 +433,9 @@ impl Node for Identifier {
         self.0.clone()
     }
     fn to_object(&self, e: &mut Environment) -> anyhow::Result<Object> {
+        todo!()
+    }
+    fn add_bytecode_to_compiler(&self, c: &mut Compiler) -> anyhow::Result<()> {
         todo!()
     }
 }
