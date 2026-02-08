@@ -5,7 +5,7 @@ This repo follows the implementation of Torsten Ball's excellent books [Writing 
 
 It's a simple implementation of the monkey interpreter and compiler.
 
-## Useage
+## Usage
 ```bash
 # run the interpreter in repl mode:
 cargo run 
