@@ -11,6 +11,7 @@ pub mod lexer;
 pub mod object;
 pub mod parser;
 pub mod token;
+pub mod vm;
 use anyhow::Result;
 use ast::Node;
 use clap::Parser;
