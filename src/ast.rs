@@ -1,7 +1,6 @@
 use core::str;
 
 use anyhow::anyhow;
-use log::debug;
 
 use crate::code::Op;
 use crate::compiler::Compiler;
@@ -348,22 +347,25 @@ impl Node for Expression {
                 left,
                 right,
             } => {
-                println!("Expression compiling");
                 left.add_bytecode_to_compiler(c)?;
                 right.add_bytecode_to_compiler(c)?;
-                Ok(())
+                match *operator_token {
+                    OperatorToken::Plus => {
+                        c.emit_bytecode(Op::Add, &[]);
+                    }
+                    _ => todo!("Other operators not handlled"),
+                };
             }
             Expression::Int(i) => {
                 // NOTE: This clearly doesn't handle large ints.
-                println!("Int compiling {:?}", i);
                 let index = c.add_constant(Object::Int(*i as isize));
                 c.emit_bytecode(Op::Constant, &[index]);
-                Ok(())
             }
             _ => {
                 todo!();
             }
-        }
+        };
+        Ok(())
     }
 }
 #[derive(Debug, Clone, PartialEq)]
@@ -398,7 +400,11 @@ impl Node for Statement {
             Self::Let(i, x) => {
                 todo!();
             }
-        }
+        }?;
+        // The result of an expression such as 1 + 2; should be
+        // Evaluated and then the value popped off the stack.
+        e.emit_bytecode(Op::Pop, &[]);
+        Ok(())
     }
 }
 impl Statement {

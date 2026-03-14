@@ -68,14 +68,14 @@ pub fn disassemble(instructions: &[u8]) -> String {
                 acc.push_str(&i);
                 acc
             })
-            .unwrap();
+            .unwrap_or_else(String::new);
         buf.push_str(&values_string);
+        buf.push('\n');
         current_index = end_index;
     }
     if buf.is_empty() {
         return buf;
     }
-    buf.push('\n');
     buf
 }
 
@@ -83,6 +83,8 @@ pub fn disassemble(instructions: &[u8]) -> String {
 #[derive(Clone, Copy)]
 pub enum Op {
     Constant,
+    Add,
+    Pop,
 }
 
 impl Op {
@@ -92,6 +94,8 @@ impl Op {
             // We don't expect to store more than 6356 values u16
             // is large enough to index our constant array.
             Op::Constant => Definition::new("Constant", vec![2]),
+            Op::Add => Definition::new("Add", vec![]),
+            Op::Pop => Definition::new("Pop", vec![]),
         }
     }
 }
@@ -99,6 +103,8 @@ impl From<Op> for u8 {
     fn from(value: Op) -> Self {
         match value {
             Op::Constant => 0,
+            Op::Add => 1,
+            Op::Pop => 2,
         }
     }
 }
@@ -106,6 +112,8 @@ impl From<u8> for Op {
     fn from(value: u8) -> Self {
         match value {
             0 => Op::Constant,
+            1 => Op::Add,
+            2 => Op::Pop,
             _ => panic!("{:?} Invalid opcode.", value),
         }
     }
@@ -158,8 +166,15 @@ mod test {
     use anyhow::Result;
     #[test]
     fn test_make() -> Result<()> {
-        let table: Vec<(Op, Vec<usize>, Vec<u8>)> =
-            vec![(Op::Constant, vec![65534], vec![0, 255, 254])];
+        let table: Vec<(Op, Vec<usize>, Vec<u8>)> = vec![
+            (
+                Op::Constant,
+                vec![65534],
+                vec![u8::from(Op::Constant), 255, 254],
+            ),
+            (Op::Add, vec![], vec![u8::from(Op::Add)]),
+            (Op::Pop, vec![], vec![u8::from(Op::Pop)]),
+        ];
         for (op, operand, expected_instructions) in &table {
             let instructions = make(*op, operand);
             assert_eq!(
@@ -178,9 +193,9 @@ mod test {
 
     #[test]
     fn test_disassemble() -> Result<()> {
-        let bytes: [u8; 3] = [0, 255, 254];
+        let bytes: Vec<u8> = vec![1, 0, 255, 254];
         let dis = disassemble(&bytes);
-        let expected = "Constant 65534\n";
+        let expected = "Add \nConstant 65534\n";
         assert_eq!(dis, expected);
         Ok(())
     }

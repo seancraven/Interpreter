@@ -1,6 +1,6 @@
 use crate::{
     ast::Node,
-    code::{ByteCode, Instructions, Op, OpCode, make},
+    code::{ByteCode, Instructions, Op, make},
     object::Object,
 };
 use anyhow::Result;
@@ -107,12 +107,29 @@ mod test {
 
     #[test]
     fn test_compiler() -> anyhow::Result<()> {
-        let table = vec![TestCase::new(
-            "1 + 2",
-            vec![Object::Int(1), Object::Int(2)],
-            // NOTE: The operand is the expected index of the constant.
-            vec![make(Op::Constant, &[0]), make(Op::Constant, &[1])],
-        )];
+        let table = vec![
+            TestCase::new(
+                "1 + 2",
+                vec![Object::Int(1), Object::Int(2)],
+                // NOTE: The operand is the expected index of the constant.
+                vec![
+                    make(Op::Constant, &[0]),
+                    make(Op::Constant, &[1]),
+                    make(Op::Add, &[]),
+                    make(Op::Pop, &[]),
+                ],
+            ),
+            TestCase::new(
+                "1; 2",
+                vec![Object::Int(1), Object::Int(2)],
+                vec![
+                    make(Op::Constant, &[0]),
+                    make(Op::Pop, &[]),
+                    make(Op::Constant, &[1]),
+                    make(Op::Pop, &[]),
+                ],
+            ),
+        ];
 
         for test in table {
             run_test(test.clone())?;
