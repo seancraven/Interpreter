@@ -80,22 +80,37 @@ pub fn disassemble(instructions: &[u8]) -> String {
 }
 
 // Types of operations represented by the opcode.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum Op {
     Constant,
     Add,
+    Mul,
+    Div,
+    Sub,
     Pop,
 }
 
 impl Op {
     /// Constant value lookup table for the definition of operation, this shouldn't even be computed.
-    fn definitions(&self) -> Definition {
+    pub fn definitions(&self) -> Definition {
         match *self {
             // We don't expect to store more than 6356 values u16
             // is large enough to index our constant array.
             Op::Constant => Definition::new("Constant", vec![2]),
-            Op::Add => Definition::new("Add", vec![]),
             Op::Pop => Definition::new("Pop", vec![]),
+            Op::Add => Definition::new("Add", vec![]),
+            Op::Sub => Definition::new("Sub", vec![]),
+            Op::Mul => Definition::new("Mul", vec![]),
+            Op::Div => Definition::new("Div", vec![]),
+        }
+    }
+    pub fn apply_pairwise_on_ints(&self, a: isize, b: isize) -> anyhow::Result<isize> {
+        match *self {
+            Op::Add => Ok(a + b),
+            Op::Sub => Ok(a - b),
+            Op::Mul => Ok(a * b),
+            Op::Div => Ok(a / b),
+            _ => Err(anyhow::anyhow!("Invalid operator for integers.")),
         }
     }
 }
@@ -103,8 +118,11 @@ impl From<Op> for u8 {
     fn from(value: Op) -> Self {
         match value {
             Op::Constant => 0,
-            Op::Add => 1,
-            Op::Pop => 2,
+            Op::Pop => 1,
+            Op::Add => 2,
+            Op::Sub => 3,
+            Op::Mul => 4,
+            Op::Div => 5,
         }
     }
 }
@@ -112,8 +130,11 @@ impl From<u8> for Op {
     fn from(value: u8) -> Self {
         match value {
             0 => Op::Constant,
-            1 => Op::Add,
-            2 => Op::Pop,
+            1 => Op::Pop,
+            2 => Op::Add,
+            3 => Op::Sub,
+            4 => Op::Mul,
+            5 => Op::Div,
             _ => panic!("{:?} Invalid opcode.", value),
         }
     }
@@ -126,7 +147,7 @@ impl From<u8> for Op {
 /// each operand can be.
 #[derive(Debug)]
 pub struct Definition {
-    name: &'static str,
+    pub name: &'static str,
     operand_widths: Vec<usize>,
 }
 impl Definition {
@@ -193,7 +214,7 @@ mod test {
 
     #[test]
     fn test_disassemble() -> Result<()> {
-        let bytes: Vec<u8> = vec![1, 0, 255, 254];
+        let bytes: Vec<u8> = vec![2, 0, 255, 254];
         let dis = disassemble(&bytes);
         let expected = "Add \nConstant 65534\n";
         assert_eq!(dis, expected);

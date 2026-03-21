@@ -1,9 +1,9 @@
-use std::array;
+use std::{array, fmt::Debug};
+use tracing::{Level, instrument, span};
 
 use crate::{
     code::{ByteCode, Instructions, Op},
     object::Object,
-    vm,
 };
 use anyhow::{Context, Result};
 
@@ -37,17 +37,20 @@ impl Vm {
         Ok(())
     }
     pub fn pop(&mut self) -> Result<Object> {
-        println!("Call to pop");
         if self.pointer == 0 {
             return Err(anyhow::anyhow!("Trying to set negative pointer"));
         };
         self.pointer -= 1;
         Ok(self.stack[self.pointer].clone())
     }
+
+    #[instrument(name = "Vm Run", skip_all)]
     pub fn run(&mut self) -> Result<()> {
         let mut ip = 0;
         while ip < self.instructions.len() {
             let op = Op::from(self.instructions[ip]);
+            let span = span!(Level::INFO, "Instruction Parse", op = format!("{:?}", op));
+            let _guard = span.enter();
             // NOTE: Edjit you must increase the pointer.
             match op {
                 Op::Constant => {
@@ -58,21 +61,22 @@ impl Vm {
                     ip += 3;
                     self.push(object)?;
                 }
-                Op::Add => {
-                    println!("Popping because of add");
+                Op::Add | Op::Sub | Op::Div | Op::Mul => {
                     let left = self
                         .pop()
                         .context("Failure during addition popping value from stack.")?;
                     let right = self
                         .pop()
                         .context("Failure during addition popping value from stack.")?;
-                    let result = left.get_int().unwrap() + right.get_int().unwrap();
+                    let result = op.apply_pairwise_on_ints(
+                        left.get_int().unwrap(),
+                        right.get_int().unwrap(),
+                    )?;
                     self.push(Object::Int(result))
                         .context("Pushing to stack after addition failed")?;
                     ip += 1;
                 }
                 Op::Pop => {
-                    println!("Popping because of pop");
                     self.pop().context("Pop operation failed.")?;
                     ip += 1;
                 }
@@ -94,8 +98,11 @@ impl Vm {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{code::disassemble, compiler::Compiler, object::Object, parser};
+    use crate::{
+        code::disassemble, compiler::Compiler, monitoring::init_tracing, object::Object, parser,
+    };
     use anyhow::Context;
+    use tracing::info;
 
     #[derive(Debug, Clone)]
     struct TestCase {
@@ -121,7 +128,6 @@ mod test {
         vm.run().unwrap();
         let object = vm.last_popped_elememnt().unwrap();
         assert_eq!(object, test_case.expected_object);
-
         Ok(())
     }
 
@@ -130,8 +136,13 @@ mod test {
         let table = vec![
             TestCase::new("1 + 2", Object::Int(3)),
             TestCase::new("1 + 4", Object::Int(5)),
+            TestCase::new("1 * 4", Object::Int(4)),
+            TestCase::new("1 * 4 * 5", Object::Int(20)),
+            TestCase::new("1 - 4 * 5", Object::Int(-19)),
         ];
+        init_tracing();
         for test in table {
+            info!("Test Case {}", test.input);
             run_test(test.clone())?;
         }
         Ok(())

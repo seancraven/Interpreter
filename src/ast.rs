@@ -1,6 +1,8 @@
 use core::str;
+use std::any::Any;
 
 use anyhow::anyhow;
+use tracing::instrument;
 
 use crate::code::Op;
 use crate::compiler::Compiler;
@@ -45,6 +47,7 @@ impl Node for Program {
     fn to_object(&self, e: &mut Environment) -> anyhow::Result<Object> {
         objectify_ordered_statements(&self.statements, e)
     }
+    #[instrument(skip_all, fields(statement_count=&self.statements.len()))]
     fn add_bytecode_to_compiler(&self, c: &mut Compiler) -> anyhow::Result<()> {
         compile_orderd_statements(&self.statements, c)
     }
@@ -340,6 +343,7 @@ impl Node for Expression {
             _ => todo!(),
         }
     }
+    #[instrument(name="expression_compile", skip_all, fields(expression_type=self.to_string()))]
     fn add_bytecode_to_compiler(&self, c: &mut Compiler) -> anyhow::Result<()> {
         match self {
             Expression::Infix {
@@ -352,6 +356,15 @@ impl Node for Expression {
                 match *operator_token {
                     OperatorToken::Plus => {
                         c.emit_bytecode(Op::Add, &[]);
+                    }
+                    OperatorToken::Minus => {
+                        c.emit_bytecode(Op::Sub, &[]);
+                    }
+                    OperatorToken::Mul => {
+                        c.emit_bytecode(Op::Mul, &[]);
+                    }
+                    OperatorToken::Div => {
+                        c.emit_bytecode(Op::Div, &[]);
                     }
                     _ => todo!("Other operators not handlled"),
                 };

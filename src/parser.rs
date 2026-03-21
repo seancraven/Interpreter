@@ -1,4 +1,5 @@
 use anyhow::{Context, anyhow, bail};
+use tracing::instrument;
 
 use crate::ast::{BlockStatement, Expression, Identifier, Node, PrefixToken, Program, Statement};
 use crate::lexer::{Lexer, LexerIterator};
@@ -20,6 +21,7 @@ impl<'s> Parser<'s> {
             next_token,
         }
     }
+    #[instrument(skip_all)]
     pub fn parse(input: impl Into<String>) -> anyhow::Result<Program> {
         let lexer = Lexer::new(input);
         let mut p = Parser::new(&lexer);

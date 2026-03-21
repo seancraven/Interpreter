@@ -8,6 +8,7 @@ pub mod ast;
 pub mod code;
 pub mod compiler;
 pub mod lexer;
+pub mod monitoring;
 pub mod object;
 pub mod parser;
 pub mod token;
@@ -15,8 +16,8 @@ pub mod vm;
 use anyhow::Result;
 use ast::Node;
 use clap::Parser;
-use log::debug;
 use object::{Environment, Object};
+use tracing::debug;
 fn main() -> Result<()> {
     let args = Args::parse();
 

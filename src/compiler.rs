@@ -4,6 +4,7 @@ use crate::{
     object::Object,
 };
 use anyhow::Result;
+use tracing::{Level, instrument, span};
 
 #[derive(Debug)]
 pub struct Compiler {
@@ -22,6 +23,7 @@ impl Compiler {
         self.constants.len() - 1
     }
 
+    #[instrument(skip_all)]
     pub fn compile(&mut self, node: impl Node) -> Result<ByteCode> {
         node.add_bytecode_to_compiler(self)?;
         Ok(self.bytecode())
