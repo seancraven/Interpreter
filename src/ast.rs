@@ -343,7 +343,7 @@ impl Node for Expression {
             _ => todo!(),
         }
     }
-    #[instrument(name="expression_compile", skip_all, fields(expression_type=self.to_string()))]
+    #[instrument(skip_all, fields(expression_type=self.to_string()))]
     fn add_bytecode_to_compiler(&self, c: &mut Compiler) -> anyhow::Result<()> {
         match self {
             Expression::Infix {
@@ -406,6 +406,7 @@ impl Node for Statement {
             }
         }
     }
+    #[instrument(skip_all)]
     fn add_bytecode_to_compiler(&self, e: &mut Compiler) -> anyhow::Result<()> {
         match self {
             Self::Expression(x) => x.add_bytecode_to_compiler(e),

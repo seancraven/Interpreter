@@ -3,6 +3,7 @@
 // 1  + 2 and generate the constant 3.
 
 use anyhow::Context;
+use tracing::instrument;
 
 use crate::object::Object;
 // Operation in the compiler is one byte wide
@@ -12,7 +13,7 @@ pub type OpCode = u8;
 pub type Instructions = Vec<u8>;
 // The whole program is just a sequence of Instructions, all our VM will do
 // is to iterate through this.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ByteCode {
     pub constants: Vec<Object>,
     pub instructions: Instructions,
@@ -104,6 +105,7 @@ impl Op {
             Op::Div => Definition::new("Div", vec![]),
         }
     }
+    #[instrument]
     pub fn apply_pairwise_on_ints(&self, a: isize, b: isize) -> anyhow::Result<isize> {
         match *self {
             Op::Add => Ok(a + b),

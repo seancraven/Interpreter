@@ -1,5 +1,5 @@
 use std::{array, fmt::Debug};
-use tracing::{Level, instrument, span};
+use tracing::{Level, info, instrument, span};
 
 use crate::{
     code::{ByteCode, Instructions, Op},
@@ -44,7 +44,7 @@ impl Vm {
         Ok(self.stack[self.pointer].clone())
     }
 
-    #[instrument(name = "Vm Run", skip_all)]
+    #[instrument(skip_all)]
     pub fn run(&mut self) -> Result<()> {
         let mut ip = 0;
         while ip < self.instructions.len() {
@@ -62,10 +62,10 @@ impl Vm {
                     self.push(object)?;
                 }
                 Op::Add | Op::Sub | Op::Div | Op::Mul => {
-                    let left = self
+                    let right = self
                         .pop()
                         .context("Failure during addition popping value from stack.")?;
-                    let right = self
+                    let left = self
                         .pop()
                         .context("Failure during addition popping value from stack.")?;
                     let result = op.apply_pairwise_on_ints(
@@ -120,14 +120,22 @@ mod test {
     }
 
     fn run_test(test_case: TestCase) -> anyhow::Result<()> {
+        println!("{}", "=".repeat(80));
+        println!("{}", "=".repeat(80));
         let program = parser::Parser::parse(test_case.input)
             .context(format!("{:?} parsing failed", test_case.input))?;
         let bytecode = Compiler::new().compile(program).unwrap();
-        println!("Instructions\n {}", disassemble(&bytecode.instructions));
+        let human_readable_instructions = disassemble(&bytecode.instructions);
         let mut vm = Vm::new(bytecode);
         vm.run().unwrap();
         let object = vm.last_popped_elememnt().unwrap();
-        assert_eq!(object, test_case.expected_object);
+        assert_eq!(
+            object, test_case.expected_object,
+            "Instructions\n{}",
+            human_readable_instructions
+        );
+        println!("{}", "=".repeat(80));
+        println!("{}", "=".repeat(80));
         Ok(())
     }
 
@@ -139,6 +147,8 @@ mod test {
             TestCase::new("1 * 4", Object::Int(4)),
             TestCase::new("1 * 4 * 5", Object::Int(20)),
             TestCase::new("1 - 4 * 5", Object::Int(-19)),
+            TestCase::new("1 - 4", Object::Int(-3)),
+            TestCase::new("4 / 1", Object::Int(4)),
         ];
         init_tracing();
         for test in table {
